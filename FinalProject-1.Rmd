@@ -1,0 +1,370 @@
+---
+title: "FinalProject"
+author: "Raj Patel"
+date: "5/3/2021"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(here)
+library(rvest)
+library(janitor)
+library(gtools)
+library(lubridate)
+library(gganimate)
+knitr::opts_chunk$set(echo = FALSE)
+
+```
+
+## Basketball Data
+
+To begin, my first dataset I am working with involves the National Basketball Association Rookie Data. Specifically, it includes 2019-2020 Rookies/2018-2019 Rookies and their respective stats for their Rookie season. This data can be found on the websites:
+"https://www.basketball-reference.com/leagues/NBA_2020_rookies-season-stats.html"
+"https://www.basketball-reference.com/leagues/NBA_2019_rookies-season-stats.html"
+"https://www.basketball-reference.com/draft/NBA_2019.html"
+"https://www.basketball-reference.com/draft/NBA_2018.html"
+
+As such, to begin this project, I am going to first have to scrape the data from the webpage. However, Some websites request that no bots access the page.
+Thus I will first have to honor that request:
+
+I also will be including several url's for 2020 Rookies and 2019 Rookies that will be needed later as well.
+
+```{r Request, warning=FALSE, message = FALSE, include = FALSE}
+url_2020 <- "https://www.basketball-reference.com/leagues/NBA_2020_rookies-season-stats.html"
+url_2019 <- "https://www.basketball-reference.com/leagues/NBA_2019_rookies-season-stats.html"
+
+url_2020_draft <- "https://www.basketball-reference.com/draft/NBA_2019.html"
+url_2019_draft <- "https://www.basketball-reference.com/draft/NBA_2018.html"
+
+robotstxt::paths_allowed(url_2020)
+robotstxt::paths_allowed(url_2020_draft)
+robotstxt::paths_allowed(url_2019)
+robotstxt::paths_allowed(url_2019_draft)
+```
+
+## Reading in the Data
+We can proceed and scrape the NBA data from the page. However, when scraping the data initally in, I noticed that the header Names were not scraping in how I wanted it. The names that I wanted was read as the first row in the data. In order to fix this, I used neat function "row_to_names" from the Janitor package to convert that firt row to be the column names for the Data.
+
+In addition, there were a couple rows that did not include any player. Thus, included some code to get rid of those as well! 
+
+This was done for both 2020 NBA rookies and 2019 NBA rookies
+
+```{r Data, warning=FALSE}
+nba_data_2020 <- read_html(url_2020) %>%
+  html_elements("table") %>%
+  .[[1]] %>%
+  html_table(header = "TRUE") %>%
+  row_to_names(1) 
+
+nba_data_2019 <- read_html(url_2019) %>%
+  html_elements("table") %>%
+  .[[1]] %>%
+  html_table(header = "TRUE") %>%
+  row_to_names(1) 
+```
+
+I did the same to the data from the other page which including draft information for the players! 
+
+```{r Draft Data, warning=FALSE}
+nba_data_draft_2020 <- read_html(url_2020_draft) %>%
+  html_elements("table") %>%
+  .[[1]] %>%
+  html_table(header = "TRUE") %>%
+  row_to_names(1) 
+
+nba_data_draft_2019 <- read_html(url_2019_draft) %>%
+  html_elements("table") %>%
+  .[[1]] %>%
+  html_table(header = "TRUE") %>%
+  row_to_names(1) 
+```
+
+## More cleaning 
+
+Note that we received a warning that our column names were not unique. In addition, there were a couple rows that did not include any player. Thus, we need to include some code to clean up the names and also include some code to get rid of those rows that we do not need! 
+
+In addition, all the variables are character variables which we do not need. Since we are focused on looking at the numerical data, we need to convert those into the right type of variable! 
+
+Here are the first five rows from each dataset for 2020 Rookies and 2019 Rookies!
+
+``` {r More Cleaning}
+nba_data_2020 <- nba_data_2020 %>%
+  clean_names("upper_camel") %>%
+  rename(`3p Makes` = X3P, `3p attempts` = X3Pa, Average_minutes = Mp_2, Average_pts = Pts_2, Average_rebounds = Trb_2, Average_assists = Ast_2)  %>%
+  filter( G != "Totals" & Rk != "Rk" ) %>%
+  mutate(across(-c(Player,Debut), parse_number))
+nba_data_2020 %>% head(n = 5)
+
+nba_data_2019 <- nba_data_2019 %>%
+  clean_names("upper_camel") %>%
+  rename(`3p Makes` = X3P, `3p attempts` = X3Pa, Average_minutes = Mp_2, Average_pts = Pts_2, Average_rebounds = Trb_2, Average_assists = Ast_2)  %>%
+  filter( G != "Totals" & Rk != "Rk" ) %>%
+  mutate(across(-c(Player,Debut), parse_number))
+nba_data_2019 %>% head(n =5)
+```
+
+Similarly, I cleaned up some of the names for the Draft data but not as much as I did with the main data. This is because I am only concerned with some of the column names from this Draft data as I want those columns in the main data in a future code chunk using 'left join'.
+
+Here are the first five rows of the Nba 2020 and Nba 2019 Drafted Rookies:
+
+```{r Draft Cleaning}
+nba_data_draft_2020 <- nba_data_draft_2020 %>%
+  clean_names("upper_camel") %>%
+  filter( G != "Totals" & Rk != "Rk" ) %>%
+  mutate(across(-c(Player,Tm,College), parse_number))
+nba_data_draft_2020 %>% head(n =5)
+
+nba_data_draft_2019 <- nba_data_draft_2019 %>%
+  clean_names("upper_camel") %>%
+  filter( G != "Totals" & Rk != "Rk" ) %>%
+  mutate(across(-c(Player,Tm,College), parse_number))
+nba_data_draft_2019 %>% head(n=5)
+```
+## Date
+
+Now that we got the numeric data covered, I noticed that the Debut variable was a character variable despite having a Date within it as well as the debut game that the rookie played in. Therefore, I feel that the best approach is to split the Debut variable into two unique variables: "Date_of_Debut" and "Debut_Opponent". With this, the "Date_of_Debut" column can be transferred into a Date variable whereas the "Debut_Opponent" variable can remain a character variable. 
+
+In addition, I noticed that the first team listed in the "Debut" variable was the team that drafted the rookie. Therefore, I want to create another variable called "Team" to designate what team the rookie plays for! I will tackle this first and also relocate that column next to the Player column and then split the "Debut" variable after! 
+``` {r Debut, echo = TRUE}
+nba_data_2020 <- nba_data_2020 %>%
+  mutate(Team = str_extract(Debut,"\\s[A-z]{3}\\s") %>%
+           str_trim()) %>%
+  relocate(Team, .before = Debut) %>% 
+  mutate(Date_of_Debut = str_split(Debut, "(\\s[A-z]{3}\\s){1}") %>%
+           map_chr(1) %>%
+           str_replace_all("\\,","") %>%
+           str_replace("\\'","20") %>%
+           mdy()) %>%
+  relocate(Date_of_Debut, .before = Age) %>%
+  mutate(Debut_Opponent = str_extract(Debut, "[A-z]{3}$") %>%
+           str_trim()) %>%
+  relocate(Debut_Opponent, .before = Age) %>%
+  select(-c(Debut,Rk))
+
+nba_data_2019 <- nba_data_2019 %>%
+  mutate(Team = str_extract(Debut,"\\s[A-z]{3}\\s") %>%
+           str_trim()) %>%
+  relocate(Team, .before = Debut) %>% 
+  mutate(Date_of_Debut = str_split(Debut, "(\\s[A-z]{3}\\s){1}") %>%
+           map_chr(1) %>%
+           str_replace_all("\\,","") %>%
+           str_replace("\\'","20") %>%
+           mdy()) %>%
+  relocate(Date_of_Debut, .before = Age) %>%
+  mutate(Debut_Opponent = str_extract(Debut, "[A-z]{3}$") %>%
+           str_trim()) %>%
+  relocate(Debut_Opponent, .before = Age) %>%
+  select(-c(Debut,Rk))
+```
+
+Now the Data looks much better! 
+
+## Joining Data
+
+I have the data cleaned but I do want some more information in regards to the player. Mainly, I want the college and the draft position of the Rookies that got drafted in the 2019 NBA draft.
+
+Therefore, I am going to create a new DF that includes the Rookie Draft positions of those who got drafted and save it under 'nba_drafted_rookies' using a left join.
+
+Note that there will not be 60 players in the DF since some players that were drafted did not play in the 2019-2020 NBA Season or 2018-2019 Season. I also only selected several variables as this DF will be used for plotting!
+
+Here, I have the first five rows of the joined date for 2020 Rookies and 2019 Rookies:
+
+```{r Join}
+
+nba_drafted_rookies_2020 <- nba_data_2020 %>%
+  left_join(nba_data_draft_2020 %>% select(Player,College,Pk), by = "Player") %>%
+  filter(!is.na(Pk)) %>%
+  select(Player,Team,College,Age,G,Pk,Pts,Average_pts,Average_rebounds,Average_assists) %>% 
+  mutate(Year = 2020) %>%
+  arrange(Pk)
+nba_drafted_rookies_2020 %>% head(n=5)
+                                  
+nba_drafted_rookies_2019 <- nba_data_2019 %>%
+  left_join(nba_data_draft_2019 %>% select(Player,College,Pk), by = "Player") %>%
+  filter(!is.na(Pk)) %>%
+  select(Player,Team,College,Age,G,Pk,Pts,Average_pts,Average_rebounds,Average_assists,G) %>% 
+  mutate(Year = 2019) %>%
+  arrange(Pk)
+nba_drafted_rookies_2019 %>% head(n=5)
+```
+
+## Plot
+
+Now, As the data is ready, I want to visualize the Average points of each Rookie year by Pick selection. 
+To do this, I will plot a scatterplot that differentiates the points by Draft Class. In addition to that, saved a new DF called 'extremes' that is composed of the highest scoring players in their rookie season (> 18 points). I will add these points into the plot along with the player names to see which players averaged the most points in their rookie season and which pick did they go. (Let's see if the top lottery teams picked correctly!)
+
+```{r Plot of Average Points}
+
+extremes <- nba_drafted_rookies_2020 %>%
+  bind_rows(nba_drafted_rookies_2019) %>% 
+  filter(Average_pts > 17)
+
+nba_drafted_rookies_2020 %>%
+  bind_rows(nba_drafted_rookies_2019) %>%
+  ggplot(aes(Pk,Average_pts)) + geom_point(aes(color = factor(Year))) +
+  geom_text(data = extremes, aes(label = Player),hjust = 0, nudge_y = 0.5, size = 3) +
+  ggtitle("Average Points from 2019 and 2020 Rookies") +
+  theme_bw() +
+  theme(plot.title = element_text(size = 15, hjust = 0.5), 
+        legend.title = element_blank()) 
+```
+
+Looking at the plot, seems to be that most of the lottery teams from both years choose the right players to draft. It also seems to be that players drafted later tend to average less points that those drafted earlier which makes sense! However, from the plot, I noticed there's one player drafted in 2020 that appears to stray away from that trend averaging more than 10 points and drafted later than 40. Let's find out who that is! 
+
+```{r Outlier}
+
+extreme_outlier <- nba_drafted_rookies_2020 %>%
+  bind_rows(nba_drafted_rookies_2019) %>% 
+  filter(Average_pts > 10 & Pk > 40)
+
+nba_drafted_rookies_2020 %>%
+  bind_rows(nba_drafted_rookies_2019) %>%
+  filter(Pk > 20) %>%
+  ggplot(aes(Pk,Average_pts)) + geom_point(aes(color = factor(Year))) +
+  geom_text(data = extreme_outlier, aes(label = Player),hjust = 0, nudge_y = 0.5, size = 3) +
+  geom_text(data = extreme_outlier, aes(label = Pk),hjust = 0, nudge_y = 1, size = 3) +
+  ggtitle("Average Points from 2019 and 2020 Rookies") +
+  theme_bw() +
+  theme(plot.title = element_text(size = 15, hjust = 0.5), 
+        legend.title = element_blank()) 
+```
+
+So the 41st pick in the 2020 NBA Draft, Eric Paschall, averaged over 10 points in his Rookie Season! Pretty Impressive for a player drafted that far down! 
+
+## Plot 
+Now with the cleaned data, I wanted to see the relationship between the age of the rookie and their averages for 2019 Rookies and 2020 Rookies. 
+
+I first only looked at Rookies that played over 10 games and visualized a boxplot differentiated by Class Year. 
+
+I then made a Bar chart to visualize the total amount of points scores by Age for the 2020 Rookies and the 2019 Rookies. I wanted to see how both draft classes compared by Age through a graphical representation.
+
+Since some rookies do not play many games, I wanted to observe only rookies that played over 10 games since I felt 10 games out of a 81 game season was an adequate amount.
+
+```{r BoxPlot}
+
+nba_drafted_rookies_2020 %>%
+  bind_rows(nba_drafted_rookies_2019) %>%
+  filter(G > 10) %>%
+  group_by(Age) %>%
+  ggplot(aes(Age,Average_pts)) +
+  geom_boxplot(aes(group = Age)) + 
+  facet_wrap(~Year) +
+  ggtitle("BoxPlot of Rookies by Age") +
+  theme_bw() +
+  theme(plot.title = element_text(size = 20, hjust = 0.5))
+  
+```
+
+```{r Bar chart}
+nba_drafted_rookies_2020 %>%
+  bind_rows(nba_drafted_rookies_2019) %>%
+  filter(G > 10) %>%
+  ggplot(aes(Age,Pts,fill = factor(Year))) +
+  theme_bw() +
+  geom_col(na.rm = TRUE)+
+  theme(axis.text.x = element_text(angle = 35, hjust = 1, color = "firebrick4"),
+        plot.title = element_text(size = 20, hjust = 0.5, color = "firebrick4"),
+        axis.title = element_text(color = "firebrick4"), 
+        axis.text.y = element_text(angle = 35, hjust = 1, color = "firebrick4"),
+        legend.title = element_blank()) + 
+  ggtitle("NBA Rookie Points by Age") 
+```
+
+Observing the data, looks like 20 year olds from the draft scored the most points in both the 2019 Class and 2020 Class. In addition, It appears that the 2019 Draft Class scored more in total and that there were no 24 year olds in the 2019 NBA Draft but there was atleast one in the 2020 NBA Draft.
+
+## Football Data
+
+For this data, I am using List of most watch television broadcasts in the US from Wiki:
+"https://en.wikipedia.org/wiki/List_of_most_watched_television_broadcasts_in_the_United_States#:~:text=Super%20Bowl%20XLIX%20is%20currently,broadcast%20with%20114.4%20million%20viewers"
+
+I am going to first read it in and then check whether bots can access the page
+```{r Superbowl Data, warning = FALSE}
+url_broadcasts <- "https://en.wikipedia.org/wiki/List_of_most_watched_television_broadcasts_in_the_United_States#:~:text=Super%20Bowl%20XLIX%20is%20currently,broadcast%20with%20114.4%20million%20viewers"
+
+robotstxt::paths_allowed(url_broadcasts)
+```
+
+## Clean Data
+Since I can access the page with bots, I am going to scrape the data from Wikipedia and clean the data by making some of the variables into the correct type i.e Rank to numeric, Date to Date, etc...
+```{r Scrape}
+Top_Broadcasts <- read_html(url_broadcasts) %>%
+  html_elements("table") %>%
+  .[[2]] %>%
+  html_table(header = "FALSE") %>%
+  row_to_names(1) 
+colnames(Top_Broadcasts)
+```
+
+```{r Clean}
+Top_Broadcasts <- Top_Broadcasts %>% 
+  mutate(Average_viewers = str_replace('Average viewers',"\\[[0-9]\\]","") %>% 
+           str_replace_all("\\,","") %>%
+           str_trim() %>%
+           as.numeric(),
+         Rank = as.numeric(Rank),
+         Year = str_extract(Date,"[0-9]{4}") %>%
+           as.numeric(),
+         Date = mdy(Date))
+
+```
+
+## Roman Numerals
+
+Next, I noticed that many of the broadcasts were Superbowl events. These Superbowls were mainly named with Roman Numerals. I wanted to create a function that converted the Superbowl names into names with numbers instead of Roman Numerals. There was a neat function called 'roman2int' from gtools that I used in the function. 
+
+I then will use the function on the DF 'Top_Broadcasts' and save it!
+```{r Roman Numerals, echo = TRUE}
+roman_numeral_to_numbers <- function(x,w){
+  x <- x %>% 
+    mutate(Roman = str_extract(w,"\\s[A-z]{1,}$"),
+           Numeric = roman2int(Roman) %>%
+             as.character(),
+           Name = str_split(w,"\\s[A-z]{1,}$") %>%
+             map_chr(1) %>%
+             str_trim(),
+           Name = case_when(is.na(Numeric) ~ Name,
+                                      TRUE ~ str_c(Name,Numeric, sep = " "))) %>%
+    select(-c(Numeric,Roman))
+    
+}
+
+Top_Broadcasts <- roman_numeral_to_numbers(Top_Broadcasts,Top_Broadcasts$Broadcast)
+
+```
+
+Let's check if it did what we needed!
+```{r Check}
+Top_Broadcasts %>% head(n=5)
+```
+## Animate
+Now, I wanted to visualize the top rated broadcasts in a neat sort of way. Specifically, I wanted to animate the plot by going through the years and plotting a point of the highest rated event from that year by its rank. I will save the animation in 'anim' and then run the animation with some neat code to make a gif!!!!!
+```{r Animate}
+
+anim <- Top_Broadcasts %>% 
+  ggplot(aes(x = Rank, y = Average_viewers)) +
+  geom_point(size = 1, alpha = 0.25) +
+  geom_text(aes(x = 15, y = 100000000, label = Year), size = 14, color = 'lightgrey') +
+  geom_text(aes(label = Name), size = 4, color = "red") +
+  scale_y_continuous(limits = c(80000000, 120000000)) +
+  transition_states(Year) +  
+  ease_aes() +
+  theme_bw() +
+  ggtitle("Animation of Highest rated broadcasts through time")
+
+animate(anim, end_pause = 5,width = 950, height = 960, res = 144)
+```
+
+
+
+## Write CSV
+
+To conclude, I am going to save the main files 'nba_drafted_rookies_2019','nba_drafted_rookies_2020', and 'Top_Broadcasts into csv's!
+
+```{r Save, echo = TRUE}
+nba_drafted_rookies_2019 %>% write_csv(here("nba_drafted_2019"))
+nba_drafted_rookies_2020 %>% write_csv(here("nba_drafted_2020"))
+Top_Broadcasts %>% write_csv(here("Top_Broadcasts_US"))
+
+```
